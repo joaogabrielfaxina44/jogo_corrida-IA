@@ -11,12 +11,12 @@ class RaceScene extends Phaser.Scene {
         this.currentLap = 1;
         this.maxLaps = 5;
         this.isRacing = false;
-        this.stats = (window.SaveManager) ? SaveManager.load() : { engineLevel: 1, accelerationLevel: 1, coins: 0 };
-        this.trackWidth = 350;
+        this.trackWidth = 400; // Pista larga conforme solicitado
+        this.stats = (window.gameStats) ? window.gameStats : SaveManager.load();
     }
 
     preload() {
-        // Carregamento com caminhos relativos para o GitHub Pages
+        // Carrega assets com caminhos relativos para GitHub Pages
         this.load.image('player_car', './assets/car_player.png');
         this.load.image('enemy_car', './assets/car_enemy.png');
         this.load.image('item_box', './assets/item_box.png');
@@ -26,37 +26,44 @@ class RaceScene extends Phaser.Scene {
     create() {
         const { width, height } = this.scale;
 
-        // 1. Gerar Pista
+        // 1. Gerar Pista (Mundo 4000x4000)
         this.trackPoints = TrackGenerator.generate(4000, 4000, 15);
 
-        // 2. Renderizar Visual da Pista
-        this.renderTrackVisual();
-
-        // 3. Configurar Física
-        this.physics.world.setBounds(0, 0, 4000, 4000);
+        // 2. Criar Grupo de Barreiras (Física Estática)
         this.barriers = this.physics.add.staticGroup();
-        this.createPerfectBarriers(); // Nova função de colisão ultra-precisa
+        this.renderTrackAndBarriers();
+
+        // 3. Configurar Mundo Físico
+        this.physics.world.setBounds(0, 0, 4000, 4000);
 
         // 4. Criar Carros
         this.player = this.createCar(this.trackPoints[0].x, this.trackPoints[0].y, 'player_car', true);
+
+        // Spawn de 3 Rivais
+        const spawnDistance = 60;
         for (let i = 0; i < 3; i++) {
-            const opp = this.createCar(this.trackPoints[0].x + (i + 1) * 60, this.trackPoints[0].y + 40, 'enemy_car', false);
+            const opp = this.createCar(
+                this.trackPoints[0].x + (i + 1) * spawnDistance,
+                this.trackPoints[0].y + 40,
+                'enemy_car',
+                false
+            );
             this.opponents.push(opp);
         }
 
-        // 5. Colididores
+        // 5. Câmera (Focada no Player)
+        this.cameras.main.setBounds(0, 0, 4000, 4000);
+        this.cameras.main.startFollow(this.player, true, 0.2, 0.2);
+        this.cameras.main.centerOn(this.player.x, this.player.y);
+
+        // 6. Colisões
         this.physics.add.collider(this.player, this.barriers);
         this.opponents.forEach(opp => {
             this.physics.add.collider(opp, this.barriers);
             this.physics.add.collider(this.player, opp);
         });
 
-        // 6. Câmera
-        this.cameras.main.setBounds(0, 0, 4000, 4000);
-        this.cameras.main.startFollow(this.player, true, 0.2, 0.2);
-        this.cameras.main.centerOn(this.player.x, this.player.y);
-
-        // 7. Interface e Itens
+        // 7. HUD e Itens
         this.createHUD();
         this.spawnItems();
         this.startCountdown();
@@ -65,40 +72,42 @@ class RaceScene extends Phaser.Scene {
     createCar(x, y, key, isPlayer) {
         const car = this.physics.add.sprite(x, y, key);
 
-        // Verificação robusta de textura
+        // Fallback: Se a imagem não for encontrada (erro no GitHub ou assets não commitados)
         if (!this.textures.exists(key) || this.textures.get(key).key === '__MISSING') {
-            console.log("Usando fallback para: " + key);
-            const textureName = key + '_rect';
+            const textureName = key + '_fallback';
             if (!this.textures.exists(textureName)) {
-                this.add.rectangle(0, 0, 40, 60, isPlayer ? 0x00a3ff : 0xff3333).generateTexture(textureName, 40, 60);
+                const graphics = this.make.graphics();
+                graphics.fillStyle(isPlayer ? 0x00a3ff : 0xff3333);
+                graphics.fillRect(0, 0, 40, 60);
+                graphics.generateTexture(textureName, 40, 60);
             }
             car.setTexture(textureName);
         }
 
         car.setCollideWorldBounds(true);
-        car.setDrag(0.95);
+        car.setDrag(0.96); // Deslize estilo arcade
         car.depth = 10;
+
+        // Hitbox refinada (ajustada para carros virados)
+        car.body.setSize(30, 45);
 
         car.stats = {
             speed: 0,
-            maxSpeed: (isPlayer ? 450 * (1 + (this.stats.engineLevel - 1) * 0.05) : 380 + Math.random() * 50),
-            acceleration: (isPlayer ? 12 * (1 + (this.stats.accelerationLevel - 1) * 0.1) : 9 + Math.random() * 4),
+            maxSpeed: (isPlayer ? 480 * (1 + (this.stats.engineLevel - 1) * 0.05) : 380 + Math.random() * 60),
+            acceleration: (isPlayer ? 14 * (1 + (this.stats.accelerationLevel - 1) * 0.1) : 10 + Math.random() * 4),
             lap: 1,
             checkpoint: 0,
             isStunned: false
         };
 
-        // Hitbox do carro (mais fina para não bater por bobeira)
-        car.body.setSize(30, 45);
-
         return car;
     }
 
-    renderTrackVisual() {
+    renderTrackAndBarriers() {
         const graphics = this.add.graphics();
 
-        // Bordas da pista (Grama/Lado de fora)
-        graphics.lineStyle(this.trackWidth + 40, 0x116611, 1);
+        // Grama (Fundo)
+        graphics.lineStyle(this.trackWidth + 60, 0x1a5e1a, 1);
         graphics.beginPath();
         graphics.moveTo(this.trackPoints[0].x, this.trackPoints[0].y);
         this.trackPoints.forEach(p => graphics.lineTo(p.x, p.y));
@@ -109,162 +118,230 @@ class RaceScene extends Phaser.Scene {
         graphics.lineStyle(this.trackWidth, 0x333333, 1);
         graphics.strokePath();
 
-        // Linhas de borda branca
-        graphics.lineStyle(this.trackWidth - 10, 0xffffff, 0.1);
+        // Linha branca suave nas bordas
+        graphics.lineStyle(this.trackWidth - 10, 0xffffff, 0.05);
         graphics.strokePath();
 
         // Linha de Chegada
         const p1 = this.trackPoints[0];
         const p2 = this.trackPoints[1];
         const angle = Phaser.Math.Angle.Between(p1.x, p1.y, p2.x, p2.y);
-        this.add.rectangle(p1.x, p1.y, this.trackWidth, 25, 0xff0000).setRotation(angle + Math.PI / 2).setDepth(1);
-    }
+        this.add.rectangle(p1.x, p1.y, this.trackWidth, 20, 0xff0000)
+            .setRotation(angle + Math.PI / 2)
+            .setDepth(1);
 
-    createPerfectBarriers() {
-        const halfWidth = this.trackWidth / 2 + 5;
-        const step = 45; // Testado para ser suave e leve
+        // Criar Barreiras Físicas (Círculos em cadeia - Mais preciso em curvas)
+        const halfWidth = this.trackWidth / 2 + 10;
+        const step = 40;
 
         for (let i = 0; i < this.trackPoints.length; i++) {
-            const p1 = this.trackPoints[i];
-            const p2 = this.trackPoints[(i + 1) % this.trackPoints.length];
-            const angle = Phaser.Math.Angle.Between(p1.x, p1.y, p2.x, p2.y);
-            const dist = Phaser.Math.Distance.Between(p1.x, p1.y, p2.x, p2.y);
-            const normal = angle + Math.PI / 2;
+            const pt1 = this.trackPoints[i];
+            const pt2 = this.trackPoints[(i + 1) % this.trackPoints.length];
+            const segmentDist = Phaser.Math.Distance.Between(pt1.x, pt1.y, pt2.x, pt2.y);
+            const segmentAngle = Phaser.Math.Angle.Between(pt1.x, pt1.y, pt2.x, pt2.y);
+            const normal = segmentAngle + Math.PI / 2;
 
-            for (let d = 0; d < dist; d += step) {
-                const ox = p1.x + Math.cos(angle) * d;
-                const oy = p1.y + Math.sin(angle) * d;
+            for (let d = 0; d < segmentDist; d += step) {
+                const curX = pt1.x + Math.cos(segmentAngle) * d;
+                const curY = pt1.y + Math.sin(segmentAngle) * d;
 
-                // Círculos de colisão invisíveis nas bordas
-                this.addBarrierCircle(ox + Math.cos(normal) * halfWidth, oy + Math.sin(normal) * halfWidth);
-                this.addBarrierCircle(ox - Math.cos(normal) * halfWidth, oy - Math.sin(normal) * halfWidth);
+                // Parede Externa
+                this.addBarrier(curX + Math.cos(normal) * halfWidth, curY + Math.sin(normal) * halfWidth);
+                // Parede Interna
+                this.addBarrier(curX - Math.cos(normal) * halfWidth, curY - Math.sin(normal) * halfWidth);
             }
         }
     }
 
-    addBarrierCircle(x, y) {
-        const c = this.add.circle(x, y, 20, 0x00ff00, 0); // Totalmente invisível
-        this.physics.add.existing(c, true); // Adiciona corpo estático
-        this.barriers.add(c);
-        c.body.setCircle(20);
+    addBarrier(x, y) {
+        const b = this.add.circle(x, y, 20, 0x000000, 0); // Invisível
+        this.physics.add.existing(b, true);
+        this.barriers.add(b);
+        b.body.setCircle(20);
     }
 
     update() {
         if (!this.player) return;
 
         if (this.isRacing) {
-            this.handlePlayerInput();
-            this.opponents.forEach(opp => this.handleAIBehavior(opp));
-            this.checkLapProgress(this.player);
-            this.opponents.forEach(opp => this.checkLapProgress(opp));
+            this.handlePlayerMovement();
+            this.handleAI();
+            this.checkProgress();
             this.updateHUD();
         }
     }
 
-    handlePlayerInput() {
+    handlePlayerMovement() {
         if (this.player.stats.isStunned) return;
+
         const cursors = this.input.keyboard.createCursorKeys();
-        let mx = 0, my = 0;
+        let moveX = 0;
+        let moveY = 0;
 
-        if (cursors.left.isDown) mx = -1;
-        else if (cursors.right.isDown) mx = 1;
-        if (cursors.up.isDown) my = -1;
-        else if (cursors.down.isDown) my = 1;
+        if (cursors.left.isDown) moveX = -1;
+        else if (cursors.right.isDown) moveX = 1;
 
-        if (mx !== 0 || my !== 0) {
-            const target = Math.atan2(my, mx);
-            this.player.rotation = Phaser.Math.Angle.RotateTo(this.player.rotation, target, 0.15);
+        if (cursors.up.isDown) moveY = -1;
+        else if (cursors.down.isDown) moveY = 1;
+
+        if (moveX !== 0 || moveY !== 0) {
+            // Rotacionar suavemente para a direção do movimento
+            const targetRotation = Math.atan2(moveY, moveX);
+            this.player.rotation = Phaser.Math.Angle.RotateTo(this.player.rotation, targetRotation, 0.15);
+
+            // Acelerar
             this.player.stats.speed = Math.min(this.player.stats.speed + this.player.stats.acceleration, this.player.stats.maxSpeed);
         } else {
+            // Drag natural
             this.player.stats.speed *= 0.96;
         }
 
-        this.player.setVelocity(Math.cos(this.player.rotation) * this.player.stats.speed, Math.sin(this.player.rotation) * this.player.stats.speed);
+        this.player.setVelocity(
+            Math.cos(this.player.rotation) * this.player.stats.speed,
+            Math.sin(this.player.rotation) * this.player.stats.speed
+        );
     }
 
-    handleAIBehavior(car) {
-        if (car.stats.isStunned) return;
-        const targetIdx = (car.stats.checkpoint + 1) % this.trackPoints.length;
-        const target = this.trackPoints[targetIdx];
-        const angle = Phaser.Math.Angle.Between(car.x, car.y, target.x, target.y);
+    handleAI() {
+        this.opponents.forEach(opp => {
+            if (opp.stats.isStunned) return;
 
-        car.rotation = Phaser.Math.Angle.RotateTo(car.rotation, angle, 0.07);
-        car.stats.speed = Math.min(car.stats.speed + car.stats.acceleration, car.stats.maxSpeed * 0.85);
-        car.setVelocity(Math.cos(car.rotation) * car.stats.speed, Math.sin(car.rotation) * car.stats.speed);
+            const targetIdx = (opp.stats.checkpoint + 1) % this.trackPoints.length;
+            const target = this.trackPoints[targetIdx];
+            const angleToTarget = Phaser.Math.Angle.Between(opp.x, opp.y, target.x, target.y);
+
+            opp.rotation = Phaser.Math.Angle.RotateTo(opp.rotation, angleToTarget, 0.08);
+            opp.stats.speed = Math.min(opp.stats.speed + opp.stats.acceleration, opp.stats.maxSpeed * 0.9);
+
+            opp.setVelocity(
+                Math.cos(opp.rotation) * opp.stats.speed,
+                Math.sin(opp.rotation) * opp.stats.speed
+            );
+        });
     }
 
-    checkLapProgress(car) {
-        const next = (car.stats.checkpoint + 1) % this.trackPoints.length;
-        if (Phaser.Math.Distance.Between(car.x, car.y, this.trackPoints[next].x, this.trackPoints[next].y) < 300) {
-            car.stats.checkpoint = next;
-            if (next === 0) {
-                car.stats.lap++;
-                if (car === this.player && car.stats.lap > this.maxLaps) this.endRace();
+    checkProgress() {
+        [this.player, ...this.opponents].forEach(car => {
+            const nextIdx = (car.stats.checkpoint + 1) % this.trackPoints.length;
+            const target = this.trackPoints[nextIdx];
+
+            if (Phaser.Math.Distance.Between(car.x, car.y, target.x, target.y) < 300) {
+                car.stats.checkpoint = nextIdx;
+                if (nextIdx === 0) {
+                    car.stats.lap++;
+                    if (car === this.player && car.stats.lap > this.maxLaps) this.endRace();
+                }
             }
-        }
+        });
     }
 
     spawnItems() {
         for (let i = 0; i < 20; i++) {
-            const p = this.trackPoints[Phaser.Math.Between(0, this.trackPoints.length - 1)];
-            const item = this.physics.add.sprite(p.x + Phaser.Math.Between(-120, 120), p.y + Phaser.Math.Between(-120, 120), 'item_box');
+            const pt = this.trackPoints[Phaser.Math.Between(0, this.trackPoints.length - 1)];
+            const item = this.physics.add.sprite(
+                pt.x + Phaser.Math.Between(-150, 150),
+                pt.y + Phaser.Math.Between(-150, 150),
+                'item_box'
+            );
+
+            // Item Fallback
+            if (!this.textures.exists('item_box') || this.textures.get('item_box').key === '__MISSING') {
+                item.setTexture('__WHITE').setTint(0xffff00);
+            }
+
             this.physics.add.overlap(this.player, item, () => {
                 item.destroy();
-                this.applyEffect(Phaser.Utils.Array.GetRandom(['turbo', 'oil', 'projectile']));
+                this.applyItemEffect(Phaser.Utils.Array.GetRandom(['turbo', 'oil', 'projectile']));
             });
         }
     }
 
-    applyEffect(type) {
+    applyItemEffect(type) {
         if (type === 'turbo') {
-            const old = this.player.stats.maxSpeed;
-            this.player.stats.maxSpeed *= 1.6;
+            const baseMax = this.player.stats.maxSpeed;
+            this.player.stats.maxSpeed *= 1.7;
             this.player.setTint(0x00ffff);
-            this.time.delayedCall(3000, () => { this.player.stats.maxSpeed = old; this.player.clearTint(); });
+            this.time.delayedCall(3000, () => {
+                this.player.stats.maxSpeed = baseMax;
+                this.player.clearTint();
+            });
         } else if (type === 'oil') {
             const oil = this.physics.add.sprite(this.player.x, this.player.y, 'oil_spill');
-            this.opponents.forEach(o => this.physics.add.overlap(o, oil, () => { this.stunCar(o); oil.destroy(); }));
+            if (!this.textures.exists('oil_spill')) oil.setTexture('__WHITE').setTint(0x000000);
+            this.opponents.forEach(o => this.physics.add.overlap(o, oil, () => {
+                this.stunCar(o);
+                oil.destroy();
+            }));
         } else if (type === 'projectile') {
-            const p = this.physics.add.sprite(this.player.x, this.player.y, 'item_box').setTint(0xff0000);
-            p.setVelocity(Math.cos(this.player.rotation) * 800, Math.sin(this.player.rotation) * 800);
-            this.opponents.forEach(o => this.physics.add.overlap(o, p, () => { this.stunCar(o); p.destroy(); }));
-            this.time.delayedCall(2000, () => p.destroy());
+            const proj = this.physics.add.sprite(this.player.x, this.player.y, 'item_box').setTint(0xff0000);
+            proj.setVelocity(Math.cos(this.player.rotation) * 1000, Math.sin(this.player.rotation) * 1000);
+            this.opponents.forEach(o => this.physics.add.overlap(o, proj, () => {
+                this.stunCar(o);
+                proj.destroy();
+            }));
+            this.time.delayedCall(2000, () => proj.destroy());
         }
     }
 
     stunCar(car) {
+        if (car.stats.isStunned) return;
         car.stats.isStunned = true;
-        car.setTint(0xff0000); car.setVelocity(0, 0);
-        this.time.delayedCall(1500, () => { car.stats.isStunned = false; car.clearTint(); });
-    }
-
-    createHUD() {
-        this.hud = this.add.container(0, 0).setScrollFactor(0).setDepth(100);
-        this.lapT = this.add.text(20, 20, 'LAP: 1/5', { fontSize: '28px', color: '#fff' });
-        this.speedT = this.add.text(20, 60, 'SPEED: 0', { fontSize: '28px', color: '#fff' });
-        this.hud.add([this.lapT, this.speedT]);
+        car.setTint(0xff0000);
+        car.setVelocity(0, 0);
+        this.time.delayedCall(2000, () => {
+            car.stats.isStunned = false;
+            car.clearTint();
+        });
     }
 
     updateHUD() {
-        this.lapT.setText(`LAP: ${Math.min(this.player.stats.lap, 5)}/5`);
-        this.speedT.setText(`SPEED: ${Math.floor(this.player.stats.speed)}`);
+        this.lapText.setText(`LAP: ${Math.min(this.player.stats.lap, this.maxLaps)}/${this.maxLaps}`);
+        this.speedText.setText(`SPEED: ${Math.floor(this.player.stats.speed)}`);
+
+        // Posição
+        let pos = 1;
+        const pScore = this.player.stats.lap * 1000 + this.player.stats.checkpoint;
+        this.opponents.forEach(o => {
+            if ((o.stats.lap * 1000 + o.stats.checkpoint) > pScore) pos++;
+        });
+        this.posText.setText(`POS: ${pos}/4`);
+    }
+
+    createHUD() {
+        const hud = this.add.container(0, 0).setScrollFactor(0).setDepth(100);
+        this.lapText = this.add.text(30, 30, 'LAP: 1/5', { fontSize: '32px', color: '#fff', stroke: '#000', strokeThickness: 5 });
+        this.speedText = this.add.text(30, 70, 'SPEED: 0', { fontSize: '28px', color: '#00ffa3', stroke: '#000', strokeThickness: 4 });
+        this.posText = this.add.text(30, 110, 'POS: 1/4', { fontSize: '28px', color: '#ffea00', stroke: '#000', strokeThickness: 4 });
+        hud.add([this.lapText, this.speedText, this.posText]);
     }
 
     startCountdown() {
-        let c = 3;
-        const t = this.add.text(640, 360, '3', { fontSize: '150px', color: '#fff', stroke: '#000', strokeThickness: 10 }).setOrigin(0.5).setScrollFactor(0).setDepth(200);
+        let count = 3;
+        const txt = this.add.text(640, 360, '3', { fontSize: '180px', color: '#fff', stroke: '#000', strokeThickness: 15 })
+            .setOrigin(0.5).setScrollFactor(0).setDepth(200);
+
         this.time.addEvent({
-            delay: 1000, repeat: 3, callback: () => {
-                if (c === 0) { t.setText('GO!'); this.isRacing = true; this.time.delayedCall(1000, () => t.destroy()); }
-                else if (c > 0) { t.setText(c); }
-                c--;
+            delay: 1000,
+            repeat: 3,
+            callback: () => {
+                if (count === 0) {
+                    txt.setText('GO!');
+                    this.isRacing = true;
+                    this.time.delayedCall(1000, () => txt.destroy());
+                } else if (count > 0) {
+                    txt.setText(count);
+                }
+                count--;
             }
         });
     }
 
     endRace() {
         this.isRacing = false;
-        this.add.text(640, 360, 'FINISH!', { fontSize: '120px', backgroundColor: '#000' }).setOrigin(0.5).setScrollFactor(0).setDepth(200);
+        this.add.text(640, 360, 'FINISH!', { fontSize: '120px', backgroundColor: '#000', padding: 20 })
+            .setOrigin(0.5).setScrollFactor(0).setDepth(200);
+
+        SaveManager.addCoins(500); // Recompensa padrão para teste
         this.time.delayedCall(3000, () => this.scene.start('MenuScene'));
     }
 }
