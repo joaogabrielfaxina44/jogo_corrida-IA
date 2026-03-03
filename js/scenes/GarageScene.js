@@ -22,7 +22,9 @@ class GarageScene extends Phaser.Scene {
 
         // Back Button
         this.createButton(width / 2, height - 80, 'BACK TO MENU', () => {
-            this.scene.start('MenuScene');
+            if (this.scene.isActive('GarageScene')) {
+                this.scene.start('MenuScene');
+            }
         });
     }
 
@@ -31,7 +33,7 @@ class GarageScene extends Phaser.Scene {
         this.uiGroup = this.add.group();
 
         const { width, height } = this.scale;
-        const stats = window.gameStats;
+        const stats = window.gameStats || SaveManager.load();
 
         // Coins
         const coinsText = this.add.text(width / 2, 140, `BALANCE: $${stats.coins}`, {

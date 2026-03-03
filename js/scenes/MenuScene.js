@@ -4,7 +4,7 @@ class MenuScene extends Phaser.Scene {
     }
 
     preload() {
-        // Load some basic UI assets if we had them, otherwise use graphics
+        // Essential assets
     }
 
     create() {
@@ -34,15 +34,18 @@ class MenuScene extends Phaser.Scene {
 
         // Buttons
         this.createButton(width / 2, height * 0.55, 'START RACE', () => {
+            console.log("Switching to RaceScene...");
             this.scene.start('RaceScene');
         });
 
         this.createButton(width / 2, height * 0.68, 'GARAGE', () => {
+            console.log("Switching to GarageScene...");
             this.scene.start('GarageScene');
         });
 
         // Coins display
-        this.add.text(width - 50, 50, `Coins: $${window.gameStats.coins}`, {
+        const stats = window.gameStats || SaveManager.load();
+        this.add.text(width - 50, 50, `Coins: $${stats.coins}`, {
             fontFamily: 'Outfit',
             fontSize: '24px',
             color: '#00ffa3'
