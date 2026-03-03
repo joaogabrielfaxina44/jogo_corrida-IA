@@ -1,0 +1,3 @@
+Este arquivo foi criado para confirmar que o Antigravity consegue escrever na sua pasta.
+Se você está vendo este arquivo, os outros (index.html, js/, css/) também devem estar aí.
+Por favor, verifique se você não está com outra pasta aberta ou se os arquivos não foram movidos.
