@@ -12,6 +12,7 @@ class RaceScene extends Phaser.Scene {
         this.maxLaps = 5;
         this.isRacing = false;
         this.stats = window.gameStats;
+        this.trackWidth = 350; // Increased width
     }
 
     preload() {
@@ -59,6 +60,13 @@ class RaceScene extends Phaser.Scene {
 
         // 10. Items
         this.spawnItems();
+
+        // 11. Physics Colliders
+        this.physics.add.collider(this.player, this.barriers);
+        this.opponents.forEach(opp => {
+            this.physics.add.collider(opp, this.barriers);
+            this.physics.add.collider(this.player, opp);
+        });
     }
 
     createCar(x, y, key, isPlayer) {
@@ -84,7 +92,10 @@ class RaceScene extends Phaser.Scene {
 
     renderTrack() {
         const graphics = this.add.graphics();
-        graphics.lineStyle(120, 0x333333, 1); // Track width
+        this.barriers = this.physics.add.staticGroup();
+
+        // 1. Draw Asphalt
+        graphics.lineStyle(this.trackWidth, 0x333333, 1);
         graphics.beginPath();
         graphics.moveTo(this.trackPoints[0].x, this.trackPoints[0].y);
 
@@ -94,17 +105,55 @@ class RaceScene extends Phaser.Scene {
         graphics.closePath();
         graphics.strokePath();
 
-        // Lines (Center)
-        graphics.lineStyle(4, 0xffffff, 0.5);
+        // 2. Draw Center Lines
+        graphics.lineStyle(4, 0xffffff, 0.3);
         graphics.strokePath();
 
-        // Finish Line
+        // 3. Create Barriers
+        const halfWidth = this.trackWidth / 2 + 10;
+        for (let i = 0; i < this.trackPoints.length; i++) {
+            const p1 = this.trackPoints[i];
+            const p2 = this.trackPoints[(i + 1) % this.trackPoints.length];
+
+            const angle = Phaser.Math.Angle.Between(p1.x, p1.y, p2.x, p2.y);
+            const normal = angle + Math.PI / 2;
+
+            // Inner and Outer Wall positions
+            const outerX1 = p1.x + Math.cos(normal) * halfWidth;
+            const outerY1 = p1.y + Math.sin(normal) * halfWidth;
+            const innerX1 = p1.x - Math.cos(normal) * halfWidth;
+            const innerY1 = p1.y - Math.sin(normal) * halfWidth;
+
+            // Place barrier segments
+            // We use simple rectangles rotated to follow the track
+            const dist = Phaser.Math.Distance.Between(p1.x, p1.y, p2.x, p2.y);
+
+            this.createBarrierSegment(outerX1, outerY1, angle, dist);
+            this.createBarrierSegment(innerX1, innerY1, angle, dist);
+        }
+
+        // Draw Finish Line
         const start = this.trackPoints[0];
         const next = this.trackPoints[1];
-        const angle = Phaser.Math.Angle.Between(start.x, start.y, next.x, next.y);
+        const finishAngle = Phaser.Math.Angle.Between(start.x, start.y, next.x, next.y);
 
-        const finishLine = this.add.rectangle(start.x, start.y, 140, 20, 0xff0000)
-            .setRotation(angle + Math.PI / 2);
+        this.add.rectangle(start.x, start.y, this.trackWidth, 20, 0xff0000)
+            .setRotation(finishAngle + Math.PI / 2);
+    }
+
+    createBarrierSegment(x, y, angle, length) {
+        // Since Arcade Physics doesn't support rotated rectangles, 
+        // we populate the segment with small static circles for better approximation.
+        const step = 20;
+        for (let d = 0; d < length; d += step) {
+            const bx = x + Math.cos(angle) * d;
+            const by = y + Math.sin(angle) * d;
+
+            const dot = this.add.circle(bx, by, 15, 0x00ffa3, 0.3); // Visible for debug, change alpha to 0 for invisible
+            this.barriers.add(dot);
+            dot.body.setCircle(15);
+            dot.body.setImmovable(true);
+        }
     }
 
     update() {
@@ -122,27 +171,35 @@ class RaceScene extends Phaser.Scene {
         if (this.player.stats.isStunned) return;
 
         const cursors = this.input.keyboard.createCursorKeys();
+        let moveX = 0;
+        let moveY = 0;
 
-        if (cursors.up.isDown) {
+        if (cursors.left.isDown) moveX = -1;
+        else if (cursors.right.isDown) moveX = 1;
+
+        if (cursors.up.isDown) moveY = -1;
+        else if (cursors.down.isDown) moveY = 1;
+
+        if (moveX !== 0 || moveY !== 0) {
+            // Calculate target angle
+            const targetAngle = Math.atan2(moveY, moveX);
+
+            // Smoothly rotate car to face movement direction
+            this.player.rotation = Phaser.Math.Angle.RotateTo(this.player.rotation, targetAngle, 0.15);
+
+            // Increase speed
             this.player.stats.speed = Math.min(this.player.stats.speed + this.player.stats.acceleration, this.player.stats.maxSpeed);
-        } else if (cursors.down.isDown) {
-            this.player.stats.speed = Math.max(this.player.stats.speed - this.player.stats.acceleration * 2, -this.player.stats.maxSpeed / 2);
         } else {
-            this.player.stats.speed *= 0.98;
+            // Apply friction/drag
+            this.player.stats.speed *= 0.95;
+            if (this.player.stats.speed < 1) this.player.stats.speed = 0;
         }
 
-        if (cursors.left.isDown) {
-            this.player.setAngularVelocity(-this.player.stats.handling * (this.player.stats.speed / 100));
-        } else if (cursors.right.isDown) {
-            this.player.setAngularVelocity(this.player.stats.handling * (this.player.stats.speed / 100));
-        } else {
-            this.player.setAngularVelocity(0);
-        }
-
-        const angle = this.player.rotation;
+        // Set velocity based on current rotation (always move forward relative to car's orientation)
+        // This makes it feel like a car while allowing 8-way directional initiation
         this.player.setVelocity(
-            Math.cos(angle) * this.player.stats.speed,
-            Math.sin(angle) * this.player.stats.speed
+            Math.cos(this.player.rotation) * this.player.stats.speed,
+            Math.sin(this.player.rotation) * this.player.stats.speed
         );
     }
 
@@ -163,7 +220,7 @@ class RaceScene extends Phaser.Scene {
 
         // Advance checkpoint
         const dist = Phaser.Math.Distance.Between(car.x, car.y, target.x, target.y);
-        if (dist < 150) {
+        if (dist < 250) {
             car.stats.checkpoint = (car.stats.checkpoint + 1) % this.trackPoints.length;
         }
     }
@@ -172,7 +229,7 @@ class RaceScene extends Phaser.Scene {
         const nextTarget = (car.stats.checkpoint + 1) % this.trackPoints.length;
         const dist = Phaser.Math.Distance.Between(car.x, car.y, this.trackPoints[nextTarget].x, this.trackPoints[nextTarget].y);
 
-        if (dist < 150) {
+        if (dist < 250) {
             car.stats.checkpoint = nextTarget;
             if (nextTarget === 0) {
                 car.stats.lap++;
