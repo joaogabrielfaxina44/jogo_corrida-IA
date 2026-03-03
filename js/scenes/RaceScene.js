@@ -25,13 +25,13 @@ class RaceScene extends Phaser.Scene {
     create() {
         const { width, height } = this.scale;
 
-        // 1. Gerar Pista
+        // 1. Gerar Pista (Centralizada na área 4000x4000)
         this.trackPoints = TrackGenerator.generate(4000, 4000, 12);
 
         // 2. Renderizar Visual da Pista
         this.renderTrackVisual();
 
-        // 3. Configurar Física
+        // 3. Configurar Física e Barreiras
         this.physics.world.setBounds(0, 0, 4000, 4000);
         this.barriers = this.physics.add.staticGroup();
         this.createOptimizedBarriers();
@@ -50,9 +50,10 @@ class RaceScene extends Phaser.Scene {
             this.physics.add.collider(this.player, opp);
         });
 
-        // 6. Câmera
+        // 6. Configuração da Câmera (AGORA FIXA NO JOGADOR)
         this.cameras.main.setBounds(0, 0, 4000, 4000);
-        this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
+        this.cameras.main.startFollow(this.player, true, 0.2, 0.2); // Seguir com leve amortecimento
+        this.cameras.main.centerOn(this.player.x, this.player.y); // Focar nele agora!
 
         // 7. Interface e Itens
         this.createHUD();
@@ -65,13 +66,14 @@ class RaceScene extends Phaser.Scene {
 
         // Fallback se a imagem sumir
         if (!this.textures.exists(key) || this.textures.get(key).key === '__MISSING') {
-            const rect = this.add.rectangle(0, 0, 40, 60, isPlayer ? 0x00a3ff : 0xff3333);
             const textureName = key + '_fallback';
             if (!this.textures.exists(textureName)) {
-                rect.generateTexture(textureName, 40, 60);
+                const graphics = this.make.graphics({ x: 0, y: 0, add: false });
+                graphics.fillStyle(isPlayer ? 0x00a3ff : 0xff3333, 1);
+                graphics.fillRect(0, 0, 40, 60);
+                graphics.generateTexture(textureName, 40, 60);
             }
             car.setTexture(textureName);
-            rect.destroy();
         }
 
         car.setCollideWorldBounds(true);
@@ -122,7 +124,6 @@ class RaceScene extends Phaser.Scene {
             const dist = Phaser.Math.Distance.Between(p1.x, p1.y, p2.x, p2.y);
             const normal = angle + Math.PI / 2;
 
-            // Barreira Externa e Interna (Retângulos em vez de círculos)
             this.addBarrierRect(p1.x + Math.cos(normal) * halfWidth, p1.y + Math.sin(normal) * halfWidth, angle, dist);
             this.addBarrierRect(p1.x - Math.cos(normal) * halfWidth, p1.y - Math.sin(normal) * halfWidth, angle, dist);
         }
@@ -137,13 +138,16 @@ class RaceScene extends Phaser.Scene {
     }
 
     update() {
-        if (!this.isRacing || !this.player) return;
+        // A Câmera deve seguir o player sempre, mesmo que o jogo não tenha começado o countdown
+        if (!this.player) return;
 
-        this.handlePlayerInput();
-        this.opponents.forEach(opp => this.handleAIBehavior(opp));
-        this.checkLapProgress(this.player);
-        this.opponents.forEach(opp => this.checkLapProgress(opp));
-        this.updateHUD();
+        if (this.isRacing) {
+            this.handlePlayerInput();
+            this.opponents.forEach(opp => this.handleAIBehavior(opp));
+            this.checkLapProgress(this.player);
+            this.opponents.forEach(opp => this.checkLapProgress(opp));
+            this.updateHUD();
+        }
     }
 
     handlePlayerInput() {
@@ -235,11 +239,11 @@ class RaceScene extends Phaser.Scene {
 
     startCountdown() {
         let c = 3;
-        const t = this.add.text(640, 360, '3', { fontSize: '150px', color: '#fff' }).setOrigin(0.5).setScrollFactor(0).setDepth(200);
+        const t = this.add.text(640, 360, '3', { fontSize: '150px', color: '#fff', stroke: '#000', strokeThickness: 10 }).setOrigin(0.5).setScrollFactor(0).setDepth(200);
         this.time.addEvent({
             delay: 1000, repeat: 3, callback: () => {
                 if (c === 0) { t.setText('GO!'); this.isRacing = true; this.time.delayedCall(1000, () => t.destroy()); }
-                else { t.setText(c); }
+                else if (c > 0) { t.setText(c); }
                 c--;
             }
         });
